@@ -1,0 +1,34 @@
+{
+  "name": "ahm-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "System-controller frontend for Allen & Heath AHM series install processors",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "sim": "node src/sim/cli.ts",
+    "server": "node src/server/index.ts",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "~6.0.3",
+    "vite": "^7.3.6"
+  }
+}
