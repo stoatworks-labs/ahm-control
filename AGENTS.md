@@ -17,7 +17,7 @@ Allen &amp; Heath's *published* protocol document plus observation of file forma
 
 **Verified:**
 
-- All 69 tests pass (`npm test`) and `npm run typecheck` is clean.
+- All 103 tests pass (`npm test`) and `npm run typecheck` is clean.
 - Protocol encoding matches the byte sequences printed in the published spec — those are
   asserted literally in `test/protocol.test.ts`.
 - The client drives the simulator over a real TCP socket: levels, mutes, crosspoints, preset
@@ -80,7 +80,8 @@ src/config/      .cfg container reader (gzip -> tar -> members)
 src/dsp/         biquad design + magnitude response, for the EQ curve
 src/server/      HTTP + WebSocket server, and the AHM TCP connection
 src/sim/         fake AHM speaking the published protocol
-web/             React UI (topology, routing, levels, processing, presets)
+src/system/      pure domain model: output topology, consoles, routing resolver
+web/             React UI (system, routing, levels, processing, presets)
 test/            node:test; no test framework dependency
 ```
 
@@ -97,3 +98,34 @@ npm run typecheck
 The config tests read the factory `.cfg` files out of `/Applications/AHM System Manager 1.61.app`
 and skip when it is absent, so CI stays green without Allen &amp; Heath software installed. No
 Allen &amp; Heath file is vendored into this repo.
+
+## The system model (added after the first release)
+
+`src/system/` is the domain model, and it is pure — no I/O, no protocol. It is the part worth
+understanding first.
+
+- **`topology.ts`** — output groups (mono/stereo, allocated zones) and the four presets.
+- **`desks.ts`** — consoles, their per-group feeds, and which are live. One production console
+  is always live; secondary consoles are switched in `single` or `multi` mode.
+- **`routing.ts`** — `resolveRouting()` turns (topology, desks, live set) into crosspoints, and
+  `diffRouting()` works out the minimum set of writes to get there.
+
+**Format compensation is one mechanism, not a pile of special cases.** A feed declares what the
+desk sends; the resolver compares that to the output group and either passes it through, sums
+it, or duplicates it. "Derive" points a group at another group's feed and then runs the same
+comparison — which is why subs derived from mains automatically give a mono mixdown for a mono
+sub group and L/R for a stereo one, with no second setting. Do not add per-case branches here.
+
+**Two containment rules that are load-bearing:**
+
+- `managedCrosspoints()` limits what may be closed to inputs and zones this system allocated, so
+  the resolver never stomps on routing an operator patched by hand elsewhere on the unit.
+- The server ALSO keeps an `opened` set of every crosspoint it has ever written. The managed set
+  alone is not enough: reconfiguring a desk to use fewer inputs (stereo → mono, or a group going
+  derived) drops those inputs out of the allocation, so their open crosspoints fall outside the
+  managed space and could never be closed — leaving a console you thought you removed still
+  feeding the PA. That bug was found by a test, not by inspection. The `opened` set does not
+  survive a server restart, which is the remaining gap.
+
+**Crosspoint writes are read back like level and mute writes.** Without it a whole resolved
+patch sits at `pending` and reads as though the unit ignored it.

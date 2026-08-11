@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SystemState, ZoneProcessing } from '../../../src/protocol/state.ts';
 import type { StripRef } from '../../../src/protocol/addressing.ts';
+import type { OutputGroup, TopologyPresetId } from '../../../src/system/topology.ts';
+import type { Desk, SecondarySelectMode } from '../../../src/system/desks.ts';
 
 export type Command =
   | { type: 'setLevel'; ref: string; level: number }
@@ -21,6 +23,15 @@ export type Command =
   | { type: 'rename'; ref: string; name: string }
   | { type: 'setPresetName'; preset: number; name: string }
   | { type: 'setProcessing'; zone: number; processing: Partial<ZoneProcessing> }
+  | { type: 'setGroupProcessing'; group: string; processing: Partial<ZoneProcessing> }
+  | { type: 'setTopologyPreset'; preset: TopologyPresetId }
+  | { type: 'setTopologyGroups'; groups: OutputGroup[] }
+  | { type: 'addDesk'; id?: string; name?: string }
+  | { type: 'updateDesk'; desk: Desk }
+  | { type: 'removeDesk'; id: string }
+  | { type: 'toggleSecondary'; id: string }
+  | { type: 'setSelectMode'; mode: SecondarySelectMode }
+  | { type: 'setSummingGain'; db: number }
   | { type: 'connect'; host: string; port?: number; model?: number }
   | { type: 'disconnect' };
 

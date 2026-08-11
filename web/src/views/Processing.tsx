@@ -29,9 +29,16 @@ const PAD_Y = 14;
  * picture of the numbers in the editor, not a prediction of the AHM's output.
  */
 export function Processing({ state, send }: Props) {
-  const [zoneIndex, setZoneIndex] = useState(1);
-  const zone = state.zones[zoneIndex - 1];
-  const processing = state.processing[zoneIndex];
+  const [groupId, setGroupId] = useState<string | null>(null);
+
+  // Default to the first group rather than pinning one at mount: the topology
+  // can change under us, and a stale id would show an empty screen.
+  const group =
+    state.topology.groups.find((g) => g.id === groupId) ?? state.topology.groups[0] ?? null;
+
+  // A stereo group's zones are edited as one, so the first zone is the editable
+  // copy and every zone in the group receives the write.
+  const processing = group ? state.processing[group.zones[0]] : undefined;
 
   const frequencies = useMemo(() => logFrequencies(CURVE_POINTS), []);
   const curve = useMemo(
@@ -39,10 +46,12 @@ export function Processing({ state, send }: Props) {
     [processing, frequencies],
   );
 
-  if (!zone || !processing) return <div className="empty">No zone {zoneIndex}.</div>;
+  if (!group || !processing) {
+    return <div className="empty">No output groups yet — define the topology on the System tab.</div>;
+  }
 
   const update = (patch: Partial<ZoneProcessing>) =>
-    send({ type: 'setProcessing', zone: zoneIndex, processing: patch });
+    send({ type: 'setGroupProcessing', group: group.id, processing: patch });
 
   const updateBand = (bandIndex: number, patch: Partial<PeqBand>) => {
     const peq = processing.peq.map((band, i) => (i === bandIndex ? { ...band, ...patch } : band));
@@ -63,17 +72,19 @@ export function Processing({ state, send }: Props) {
   return (
     <div className="proc-layout">
       <div className="panel">
-        <h2 className="panel-title">Outputs</h2>
+        <h2 className="panel-title">Output groups</h2>
         <div className="zone-picker">
-          {state.zones.map((z) => (
+          {state.topology.groups.map((g) => (
             <button
-              key={z.index}
+              key={g.id}
               className="zone-btn"
-              aria-selected={z.index === zoneIndex}
-              onClick={() => setZoneIndex(z.index)}
+              aria-selected={g.id === group.id}
+              onClick={() => setGroupId(g.id)}
             >
-              <span className="n">{String(z.index).padStart(2, '0')}</span>
-              <span>{z.name}</span>
+              <span className="n">{g.zones.join('/')}</span>
+              <span>{g.name}</span>
+              <span className="spacer" />
+              <span className="n">{g.format === 'stereo' ? 'st' : 'mono'}</span>
             </button>
           ))}
         </div>
@@ -89,7 +100,11 @@ export function Processing({ state, send }: Props) {
 
         <div className="panel">
           <h2 className="panel-title">
-            {zone.name} — parametric EQ <span className="pill local">local</span>
+            {group.name} — parametric EQ <span className="pill local">local</span>
+            <span style={{ color: 'var(--text-faint)', fontWeight: 400, marginLeft: 8 }}>
+              zone{group.zones.length > 1 ? 's' : ''} {group.zones.join(' + ')} · every live console
+              routed here shares this processing
+            </span>
           </h2>
 
           <svg className="eq-svg" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none">

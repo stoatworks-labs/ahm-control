@@ -21,11 +21,27 @@ import { readSystemConfig } from '../config/container.ts';
 import { parseStripId } from '../protocol/addressing.ts';
 import {
   createSystemState,
+  crosspointKey,
   defaultProcessing,
   stripsFor,
   type SystemState,
   type ZoneProcessing,
 } from '../protocol/state.ts';
+import {
+  allocateZones,
+  topologyFromPreset,
+  type OutputGroup,
+  type TopologyPresetId,
+} from '../system/topology.ts';
+import {
+  allocateDeskInputs,
+  deskForTopology,
+  reconcileDesk,
+  setSelectMode,
+  toggleSecondary,
+  type Desk,
+} from '../system/desks.ts';
+import { diffRouting, managedCrosspoints, resolveRouting } from '../system/routing.ts';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const WEB_DIST = join(HERE, '..', '..', 'web', 'dist');
@@ -58,6 +74,23 @@ export async function startServer(options: ServerOptions = {}) {
   /** State shown when no device exists, so the UI always has something. */
   let offlineState: SystemState = createSystemState(model);
 
+  /**
+   * Every crosspoint this server has ever opened.
+   *
+   * The managed space computed from the CURRENT allocation is not enough to
+   * close things down. Reconfiguring a desk to use fewer inputs — a stereo feed
+   * becoming mono, or a group switching to derived — drops those inputs out of
+   * the allocation, so their still-open crosspoints fall outside the managed set
+   * and can never be closed again. That leaves a console you thought you had
+   * removed still feeding the PA.
+   *
+   * Remembering what we opened means we can always close it. It is deliberately
+   * additive and never pruned: forgetting is exactly the failure being fixed.
+   * It does not survive a restart, which is the one gap — a fresh server does
+   * not know what the previous one opened.
+   */
+  const opened = new Set<string>();
+
   const sockets = new Set<WebSocket>();
 
   const currentState = (): SystemState => {
@@ -79,6 +112,11 @@ export async function startServer(options: ServerOptions = {}) {
     next.state.processing = offlineState.processing;
     next.state.presetNames = offlineState.presetNames;
     next.state.configVersion = offlineState.configVersion;
+    // The system design is ours, not the unit's -- it must survive a reconnect
+    // or an operator would lose their whole patch on a dropped link.
+    next.state.topology = offlineState.topology;
+    next.state.desks = offlineState.desks;
+    next.state.routingWarnings = offlineState.routingWarnings;
     for (const kind of ['input', 'zone', 'controlGroup'] as const) {
       const previous = stripsFor(offlineState, kind);
       stripsFor(next.state, kind).forEach((strip, i) => {
@@ -192,10 +230,123 @@ export async function startServer(options: ServerOptions = {}) {
     socket.on('close', () => sockets.delete(socket));
   });
 
+  /**
+   * Re-derive the patch and push only what changed.
+   *
+   * Called after ANY change to the topology, the desks, or which desks are
+   * live. Desks are reconciled and re-allocated first so a topology edit cannot
+   * leave a desk feeding a group that no longer exists.
+   *
+   * Crosspoints outside the managed space are never touched — see
+   * managedCrosspoints() for why that containment matters.
+   */
+  function applyRouting(state: SystemState): void {
+    state.topology = {
+      ...state.topology,
+      groups: allocateZones(state.topology.groups, state.model),
+    };
+    state.desks = {
+      ...state.desks,
+      desks: allocateDeskInputs(
+        state.desks.desks.map((desk) => reconcileDesk(desk, state.topology)),
+        state.model,
+      ),
+    };
+
+    const { crosspoints, warnings } = resolveRouting(state.topology, state.desks);
+    state.routingWarnings = warnings;
+
+    if (device) {
+      const managed = managedCrosspoints(state.topology, state.desks);
+      for (const key of opened) managed.add(key);
+
+      const changes = diffRouting(crosspoints, state.sends, managed);
+      for (const change of changes) {
+        device.setSendLevel(change.from, change.to, change.level);
+        if (change.level > 0) opened.add(crosspointKey(change.from, change.to));
+      }
+    }
+
+    broadcast();
+  }
+
   function handleCommand(msg: Record<string, unknown>): void {
     const state = device ? device.state : offlineState;
 
     switch (msg.type) {
+      // ---- system design -------------------------------------------------
+
+      case 'setTopologyPreset': {
+        state.topology = topologyFromPreset(String(msg.preset) as TopologyPresetId, state.model);
+        applyRouting(state);
+        break;
+      }
+
+      case 'setTopologyGroups': {
+        state.topology = {
+          preset: 'custom',
+          groups: msg.groups as OutputGroup[],
+        };
+        applyRouting(state);
+        break;
+      }
+
+      case 'addDesk': {
+        const id = String(msg.id ?? `desk${state.desks.desks.length + 1}`);
+        const role = state.desks.desks.some((d) => d.role === 'production')
+          ? ('secondary' as const)
+          : ('production' as const);
+        state.desks = {
+          ...state.desks,
+          desks: [
+            ...state.desks.desks,
+            deskForTopology(id, String(msg.name ?? `Desk ${state.desks.desks.length + 1}`), role, state.topology),
+          ],
+        };
+        applyRouting(state);
+        break;
+      }
+
+      case 'updateDesk': {
+        const incoming = msg.desk as Desk;
+        state.desks = {
+          ...state.desks,
+          desks: state.desks.desks.map((desk) => (desk.id === incoming.id ? incoming : desk)),
+        };
+        applyRouting(state);
+        break;
+      }
+
+      case 'removeDesk': {
+        const id = String(msg.id);
+        state.desks = {
+          ...state.desks,
+          desks: state.desks.desks.filter((desk) => desk.id !== id),
+          activeSecondaryIds: state.desks.activeSecondaryIds.filter((active) => active !== id),
+        };
+        applyRouting(state);
+        break;
+      }
+
+      case 'toggleSecondary':
+        state.desks = toggleSecondary(state.desks, String(msg.id));
+        applyRouting(state);
+        break;
+
+      case 'setSelectMode':
+        state.desks = setSelectMode(state.desks, msg.mode === 'multi' ? 'multi' : 'single');
+        applyRouting(state);
+        break;
+
+      case 'setSummingGain':
+        state.desks = { ...state.desks, summingGainDb: Number(msg.db) };
+        applyRouting(state);
+        break;
+
+      case 'reapplyRouting':
+        applyRouting(state);
+        break;
+
       case 'setLevel':
         device?.setLevel(parseStripId(String(msg.ref)), Number(msg.level));
         break;
@@ -252,6 +403,23 @@ export async function startServer(options: ServerOptions = {}) {
           ...incoming,
           origin: 'local',
         };
+        broadcast();
+        break;
+      }
+
+      case 'setGroupProcessing': {
+        // Processing lives on the output, so every desk routed to a group
+        // shares it. A stereo group's two zones are edited as one.
+        const group = state.topology.groups.find((g) => g.id === String(msg.group));
+        if (!group) break;
+        const incoming = msg.processing as Partial<ZoneProcessing> | undefined;
+        for (const zone of group.zones) {
+          state.processing[zone] = {
+            ...(state.processing[zone] ?? defaultProcessing()),
+            ...incoming,
+            origin: 'local',
+          };
+        }
         broadcast();
         break;
       }

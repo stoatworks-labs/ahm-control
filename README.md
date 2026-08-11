@@ -7,11 +7,42 @@
 > message for them.
 
 A system-controller frontend for the Allen &amp; Heath AHM series, in the style of a Lake
-Controller or a dbx DriveRack: preset recall, a live input routing matrix, a system topology
-view, and per-output processing.
+Controller or a dbx DriveRack.
 
 Runs as a small local server plus a browser UI, so one machine holds the connection to the
 processor and any number of tablets or laptops on the network can drive it.
+
+## The idea
+
+You describe the PA once, describe each console once, and then run the show by switching
+consoles in and out.
+
+**1. Define the output topology.** Pick a preset — *Left &amp; Right*; *+ Subs*;
+*+ Frontfills*; *+ Delays* — or build it by hand. Each output group is mono or stereo and
+takes the zones it needs.
+
+**2. Describe each console.** A console provides one feed per output group. One is the
+**production console** and is always live; the rest are secondary and get switched in, either
+one at a time or several together.
+
+**3. A console that does not match the system is compensated automatically.** Declare what
+the desk actually sends and the routing follows:
+
+| Desk sends | Output group | What happens |
+| --- | --- | --- |
+| stereo | stereo | leg for leg |
+| mono | mono | straight through |
+| stereo | **mono** | summed, each leg at the summing gain (default −3 dB) |
+| mono | **stereo** | fed to both sides at unity |
+| *nothing* | any | **derive** it from another group |
+
+That last row is the useful one. A desk with no sub send derives its subs from the mains, and
+what comes out depends on the system rather than on a second piece of configuration: a mono
+sub group gets a mono mixdown, a stereo sub group gets L/R. Subs on an aux need no special
+case at all — that is just a direct feed.
+
+Because processing lives on the output, every console routed to a group goes through the same
+EQ, delay and dynamics. Switching desks never changes the tuning.
 
 ## What actually works
 
@@ -25,7 +56,8 @@ project implements all of it, and is honest about the rest.
 | Input / zone / control-group mutes | Live |
 | Input → zone and zone → zone routing | Live, level and mute per crosspoint |
 | Source selector | Live, including the unit's colour and name reply |
-| System topology | Derived from the matrix state, model size and an imported `.cfg` |
+| Output topology and console feeds | Resolved to crosspoints and pushed to the unit |
+| Switching consoles in and out | Live — the outgoing console's crosspoints are closed |
 | PEQ / delay / compressor / limiter | **Local only — not sent to the unit** |
 | Channel and preset names | Local only — the protocol cannot read them back |
 
@@ -65,10 +97,11 @@ profile and password handshake; only the plaintext port is implemented.
 npm test
 ```
 
-69 tests. The protocol tests assert byte sequences taken from Allen &amp; Heath's published
-document; the integration tests run the client against the simulator over a real TCP socket; the
-config tests parse the six factory `.cfg` files that ship inside AHM System Manager, and skip
-cleanly when it is not installed.
+103 tests. The protocol tests assert byte sequences taken from Allen &amp; Heath's published
+document; the system tests cover the topology, desk and routing-resolver logic including every
+format-compensation case; the integration tests run the client against the simulator over a real
+TCP socket; the config tests parse the six factory `.cfg` files that ship inside AHM System
+Manager, and skip cleanly when it is not installed.
 
 ```bash
 npm run typecheck
@@ -83,6 +116,8 @@ browser (React)  ──WebSocket──>  local server  ──TCP 51325──>  A
 ```
 
 `src/protocol/` is pure and has no I/O: message encoding, the level curve, channel addressing.
+`src/system/` is also pure and holds the domain model — output topology, consoles, and the
+resolver that turns them into crosspoints.
 `src/server/device.ts` owns the socket and the state cache. `src/sim/` is a fake AHM built from
 the same spec, which is what the tests run against.
 

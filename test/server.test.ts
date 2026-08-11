@@ -149,6 +149,76 @@ test('processing edits are stored but never marked as device state', async () =>
   });
 });
 
+test('a crosspoint write is confirmed by read-back, not left pending', async () => {
+  await withServer(async (rig) => {
+    await waitFor(() => rig.latest()?.status === 'connected');
+
+    rig.send({ type: 'setSendLevel', from: 'input:2', to: 'zone:5', level: 90 });
+    // The simulator broadcasts to OTHER clients, so without an explicit
+    // read-back this would sit at 'pending' forever and read as "not taken".
+    await waitFor(() => rig.latest().sends['input:2->zone:5']?.origin === 'device');
+    assert.equal(rig.latest().sends['input:2->zone:5'].level, 90);
+  });
+});
+
+test('a topology preset plus a live desk patches the unit end to end', async () => {
+  await withServer(async (rig) => {
+    await waitFor(() => rig.latest()?.status === 'connected');
+
+    rig.send({ type: 'setTopologyPreset', preset: 'lr-sub-ff-delay' });
+    await waitFor(() => rig.latest().topology.groups.length === 4);
+
+    // Mains stereo (1,2), subs mono (3), frontfill mono (4), delays stereo (5,6).
+    assert.deepEqual(
+      rig.latest().topology.groups.map((g: any) => g.zones),
+      [[1, 2], [3], [4], [5, 6]],
+    );
+
+    // The default production desk matches the system, so six legs open.
+    await waitFor(() => Object.values(rig.latest().sends).filter((s: any) => s.level > 0).length === 6);
+
+    rig.send({ type: 'addDesk', id: 'band', name: 'Band' });
+    await waitFor(() => rig.latest().desks.desks.length === 2);
+
+    rig.send({ type: 'toggleSecondary', id: 'band' });
+    await waitFor(() => Object.values(rig.latest().sends).filter((s: any) => s.level > 0).length === 12);
+
+    // Switching it back out must close its crosspoints, not just stop feeding.
+    rig.send({ type: 'toggleSecondary', id: 'band' });
+    await waitFor(() => Object.values(rig.latest().sends).filter((s: any) => s.level > 0).length === 6);
+  });
+});
+
+test('a mismatched desk is compensated on the wire', async () => {
+  await withServer(async (rig) => {
+    await waitFor(() => rig.latest()?.status === 'connected');
+
+    rig.send({ type: 'setTopologyPreset', preset: 'lr-sub' });
+    await waitFor(() => rig.latest().topology.groups.length === 2);
+
+    // Reshape the production desk: mono mains, and no sub send at all.
+    const desk = structuredClone(rig.latest().desks.desks[0]);
+    desk.feeds[0].format = 'mono';
+    desk.feeds[1].source = 'derived';
+    desk.feeds[1].deriveFrom = 'main';
+    rig.send({ type: 'updateDesk', desk });
+
+    // Wait on the specific crosspoint the change should create. A count of 3 is
+    // already true from the matching patch, so waiting on the count samples the
+    // old state and passes for the wrong reason.
+    await waitFor(() => (rig.latest().sends['input:1->zone:2']?.level ?? 0) > 0);
+
+    const open = Object.entries(rig.latest().sends)
+      .filter(([, v]: any) => v.level > 0)
+      .map(([k]) => k)
+      .sort();
+
+    // One mono input feeds both sides of the mains AND the derived sub.
+    assert.deepEqual(open, ['input:1->zone:1', 'input:1->zone:2', 'input:1->zone:3']);
+    assert.deepEqual(rig.latest().routingWarnings, []);
+  });
+});
+
 test('a bad command does not take the server down', async () => {
   await withServer(async (rig) => {
     await waitFor(() => rig.latest() !== null);

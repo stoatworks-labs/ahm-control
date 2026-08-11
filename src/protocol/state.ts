@@ -13,6 +13,10 @@
  */
 
 import type { StripKind } from './addressing.ts';
+import type { OutputTopology } from '../system/topology.ts';
+import { topologyFromPreset } from '../system/topology.ts';
+import type { DeskSystem } from '../system/desks.ts';
+import { allocateDeskInputs, createDeskSystem, deskForTopology } from '../system/desks.ts';
 
 /** Where a value came from, so the UI can never imply a false round trip. */
 export type ValueOrigin =
@@ -130,6 +134,13 @@ export interface SystemState {
   presetNames: Record<number, string>;
   /** Set when a system .cfg has been imported. */
   configVersion: string | null;
+
+  /** What the PA is: the output groups the system is built around. */
+  topology: OutputTopology;
+  /** The consoles feeding it, and which are live. */
+  desks: DeskSystem;
+  /** Anything the resolver could not route, for display. */
+  routingWarnings: string[];
 }
 
 export function crosspointKey(
@@ -152,7 +163,18 @@ function makeStrips(kind: StripKind, count: number, label: string): Strip[] {
 }
 
 export function createSystemState(model: 16 | 32 | 64): SystemState {
+  // Open on the simplest system that is still a system: a stereo pair fed by
+  // one production console. Everything else is a preset click away.
+  const topology = topologyFromPreset('lr', model);
+  const desks = {
+    ...createDeskSystem(),
+    desks: allocateDeskInputs([deskForTopology('production', 'Production', 'production', topology)], model),
+  };
+
   return {
+    topology,
+    desks,
+    routingWarnings: [],
     model,
     status: 'disconnected',
     host: '',

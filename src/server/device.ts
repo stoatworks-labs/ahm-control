@@ -18,6 +18,8 @@ import {
   setSendMute,
   getLevel,
   getMute,
+  getSendLevel,
+  getSendMute,
   recallPreset,
   selectSource,
   PORT_PLAIN,
@@ -234,6 +236,23 @@ export class AhmDevice extends EventEmitter {
     );
   }
 
+  /**
+   * Same read-back for a crosspoint. Without it a whole resolved patch sits at
+   * 'pending' indefinitely, which reads as "the unit never took it".
+   */
+  #confirmSend(from: StripRef, to: StripRef): void {
+    const key = crosspointKey(from, to);
+    clearTimeout(this.#confirmTimers.get(key));
+    this.#confirmTimers.set(
+      key,
+      setTimeout(() => {
+        this.#confirmTimers.delete(key);
+        this.#send(getSendLevel(from, to));
+        this.#send(getSendMute(from, to));
+      }, CONFIRM_DELAY_MS),
+    );
+  }
+
   /** Seed the cache. Only levels and mutes are queryable per strip. */
   #requestSync(): void {
     const kinds = [
@@ -286,7 +305,9 @@ export class AhmDevice extends EventEmitter {
       origin: 'pending',
     };
     this.emit('state', this.state);
-    return this.#send(setSendLevel(from, to, level));
+    const sent = this.#send(setSendLevel(from, to, level));
+    if (sent) this.#confirmSend(from, to);
+    return sent;
   }
 
   setSendMute(from: StripRef, to: StripRef, muted: boolean): boolean {
@@ -297,7 +318,9 @@ export class AhmDevice extends EventEmitter {
       origin: 'pending',
     };
     this.emit('state', this.state);
-    return this.#send(setSendMute(from, to, muted));
+    const sent = this.#send(setSendMute(from, to, muted));
+    if (sent) this.#confirmSend(from, to);
+    return sent;
   }
 
   recallPreset(preset: number): boolean {

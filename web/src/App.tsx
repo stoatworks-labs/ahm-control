@@ -1,17 +1,17 @@
 import { useRef, useState } from 'react';
 import { useSystem, uploadConfig } from './lib/system.ts';
 import { StripRow } from './components/Strip.tsx';
-import { Topology } from './views/Topology.tsx';
+import { System } from './views/System.tsx';
 import { Routing } from './views/Routing.tsx';
 import { Processing } from './views/Processing.tsx';
 import { Presets } from './views/Presets.tsx';
 
-const TABS = ['Topology', 'Routing', 'Levels', 'Processing', 'Presets'] as const;
+const TABS = ['System', 'Routing', 'Levels', 'Processing', 'Presets'] as const;
 type Tab = (typeof TABS)[number];
 
 export function App() {
   const { state, linkUp, send } = useSystem();
-  const [tab, setTab] = useState<Tab>('Topology');
+  const [tab, setTab] = useState<Tab>('System');
   const [host, setHost] = useState('');
   const [configInfo, setConfigInfo] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -97,7 +97,7 @@ export function App() {
           <div className="empty">Waiting for the local server…</div>
         ) : (
           <>
-            {tab === 'Topology' && <Topology state={state} />}
+            {tab === 'System' && <System state={state} send={send} />}
             {tab === 'Routing' && <Routing state={state} send={send} />}
             {tab === 'Levels' && <Levels state={state} send={send} />}
             {tab === 'Processing' && <Processing state={state} send={send} />}
