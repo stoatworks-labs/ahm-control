@@ -1,6 +1,7 @@
 # ahm-control
 
-> This is an AI-assisted project. The code was written with [Claude Code](https://claude.com/claude-code).
+> **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
+> (Anthropic), directed and reviewed by a human author.
 > Everything here has been verified against the published Allen &amp; Heath protocol document and a
 > simulator built from it — **no AHM hardware has ever been connected to this code**, and the
 > EQ/delay/dynamics screens are not sent to a unit at all, because the published protocol has no
