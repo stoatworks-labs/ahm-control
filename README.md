@@ -129,6 +129,10 @@ the same spec, which is what the tests run against.
 - [docs/config-format.md](docs/config-format.md) — what is known about the System Manager `.cfg`
   container, and what is still opaque
 
+<!-- attributions:start -->
+This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+<!-- attributions:end -->
+
 ## Licence
 
 MIT. Allen &amp; Heath, AHM and dLive are trademarks of Allen &amp; Heath Limited. This project is
