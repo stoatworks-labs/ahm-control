@@ -54,7 +54,8 @@ Allen &amp; Heath's *published* protocol document plus observation of file forma
 - **The decoder is stateful.** NRPN arrives as three separate messages, so the decoder keeps
   per-MIDI-channel state and must be reset when a connection drops, or a half-parsed parameter
   from the old link corrupts the first value on the new one.
-- **Dependency pins are deliberate**: typescript `~6.0.3`, eslint `^9`, vite `^7`. TS 7,
+- **Dependency pins are deliberate**: typescript `~6.0.3`, vite `^7` (eslint isn't a dependency
+  here yet; if it's added, pin it at `^9`). TS 7,
   eslint 10 and vite 8 all break this stack. Do not accept those Dependabot majors.
 
 ## Traps already hit here
@@ -96,7 +97,8 @@ npm run typecheck
 ```
 
 The config tests read the factory `.cfg` files out of `/Applications/AHM System Manager 1.61.app`
-and skip when it is absent, so CI stays green without Allen &amp; Heath software installed. No
+and skip when it is absent, so `npm test` stays green without Allen &amp; Heath software installed
+(there's no CI workflow in this repo). No
 Allen &amp; Heath file is vendored into this repo.
 
 ## The system model (added after the first release)
